@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Registro de Horas (offline)</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1c2430;--mut:#6b7686;--bd:#dde2e9;--ac:#2563eb;--ok:#15803d;--bad:#b91c1c;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12161c;--card:#1b212a;--tx:#e6eaf0;--mut:#98a3b3;--bd:#2c3542;--ac:#6ea0ff;--ok:#4ade80;--bad:#f87171}}
+:root[data-theme="dark"]{--bg:#12161c;--card:#1b212a;--tx:#e6eaf0;--mut:#98a3b3;--bd:#2c3542;--ac:#6ea0ff;--ok:#4ade80;--bad:#f87171}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.4 system-ui,sans-serif}
+main{max-width:820px;margin:0 auto;padding:16px}h1{font-size:20px;margin:0 0 12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:12px;margin-bottom:12px}
+.f{display:grid;grid-template-columns:130px 140px 110px 1fr auto;gap:8px}
+@media(max-width:640px){.f{grid-template-columns:1fr 1fr}.f .w{grid-column:1/-1}}
+input,textarea,button{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px 9px;min-width:0}
+button{cursor:pointer}button.p{background:var(--ac);border-color:var(--ac);color:#fff}
+.dh{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;border-bottom:1px solid var(--bd);padding-bottom:8px;margin-bottom:6px}
+.dh b{font-size:16px}.mut{color:var(--mut);font-size:12px}.ok{color:var(--ok)}.bad{color:var(--bad)}
+.dh input{width:90px;padding:3px 6px}
+.r{display:grid;grid-template-columns:110px 80px 1fr auto;gap:8px;padding:4px 0;align-items:center}
+.r button{padding:1px 7px}.tools{display:flex;gap:8px;flex-wrap:wrap}
+select{font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--bd);border-radius:6px;padding:7px 9px}
+textarea{width:100%;height:120px;margin-top:8px}.hide{display:none}
+</style></head><body><main>
+<h1>Registro de Horas</h1>
+<div class="card hide" id="bn"><div id="bt"></div><button class="p" id="bb" style="margin-top:8px">Baixar backup e limpar antigos</button></div>
+<div class="card"><div class="f">
+<input type="date" id="d"><input id="c" placeholder="Chamado (BKPB1-585)"><input id="t" placeholder="1h 48m">
+<input id="o" class="w" placeholder="Observações"><button class="p" id="add">Adicionar</button><div id="msg" class="bad" style="grid-column:1/-1;font-size:13px"></div></div></div>
+<div class="card tools"><button id="imp">Importar do bloco de notas</button><button id="exp">Exportar CSV</button><button id="bj">Salvar cópia (JSON)</button><button id="rj">Restaurar cópia</button><input type="file" id="fj" accept=".json,application/json" class="hide"><span class="mut" id="st"></span>
+<div class="hide" style="width:100%" id="ib"><textarea id="it" placeholder="Cole aqui no formato: 01-09 (6h)&#10;BKPB1-585  1h 48m"></textarea><button class="p" id="go">Importar (ano atual)</button></div></div>
+<div class="card tools"><label class="mut">De <input type="date" id="f1"></label><label class="mut">Até <input type="date" id="f2"></label>
+<select id="ty"><option value="">Tudo</option><option value="c">Só chamados</option><option value="n">Só fora do Jira</option></select>
+<select id="or"><option value="d">Mais recentes primeiro</option><option value="a">Mais antigos primeiro</option></select>
+<button id="fc">Limpar filtros</button><div class="mut" style="width:100%" id="sum"></div></div>
+<div id="days"></div></main>
+<script>
+const $=id=>document.getElementById(id);
+let S={e:[],j:{},bk:[]},editId=null,store=null,tm,dirty=false,delId=null;
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function pt(s){s=String(s||'').trim().toLowerCase();let x=s.match(/^(\d+):(\d{1,2})$/);if(x)return +x[1]*60+ +x[2];
+  x=s.match(/^(\d+)\s*h\s*(\d+)$/);if(x)return +x[1]*60+ +x[2];
+  const h=s.match(/(\d+)\s*h/),m=s.match(/(\d+)\s*m/);return h||m?(h?+h[1]*60:0)+(m?+m[1]:0):null}
+const msg=t=>{$('msg').className='bad';$('msg').textContent=t||''};
+function fmt(n){const a=Math.abs(n),h=Math.floor(a/60),m=a%60;return [h?h+'h':'',m||!h?m+'m':''].filter(Boolean).join(' ')}
+const stamp=iso=>{const x=new Date(iso);return x.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})+' '+x.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})};
+const today=()=>{const x=new Date();return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0')};
+async function init(){
+  $('d').value=today();
+  if(!store){store={load:async()=>{try{return JSON.parse(localStorage.getItem('horas'))}catch(e){return null}},save:async d=>{try{localStorage.setItem('horas',JSON.stringify(d))}catch(e){}}};$('st').textContent='Salvo neste navegador deste computador. Use "Salvar cópia (JSON)" para levar a outro PC.'}
+  try{const d=await store.load();if(d&&d.e){const loc=S.e;S={e:Array.from(d.e,x=>({...x})),j:{...(d.j||{})},bk:Array.from(d.bk||[])};loc.forEach(x=>{if(!S.e.some(y=>y.i===x.i))S.e.push(x)})}}catch(e){}
+  render();if(dirty)save()}
+function save(){render();if(!store)return;clearTimeout(tm);tm=setTimeout(()=>store.save(S).catch(()=>{msg('Atenção: não consegui gravar na nuvem. Exporte o CSV para não perder dados.')}),400)}
+const isT=t=>/^[A-Za-z0-9]+-\d+$/.test(t);
+const sm=(L,v)=>L.filter(x=>isT(x.t)===v).reduce((a,x)=>a+x.m,0);
+function render(){
+  const f=$('f1').value,t=$('f2').value,k=$('ty').value,g={};
+  S.e.forEach(x=>{if((f&&x.d<f)||(t&&x.d>t))return;if((k==='c'&&!isT(x.t))||(k==='n'&&isT(x.t)))return;(g[x.d]=g[x.d]||[]).push(x)});
+  const ds=Object.keys(g).sort();if($('or').value==='d')ds.reverse();
+  let TC=0,TN=0;
+  $('days').innerHTML=ds.map(d=>{const L=g[d],A=S.e.filter(x=>x.d===d),c=sm(A,true),n=sm(A,false),up=A.map(x=>x.u).sort().pop();TC+=c;TN+=n;
+    return `<div class="card" id="day-${d}"><div class="dh"><b>${d.split('-').reverse().join('/')}</b><span>Chamados: <b>${fmt(c)}</b></span><span>Fora do Jira: <b>${fmt(n)}</b></span><span class="mut">Total: ${fmt(c+n)}</span>
+    <span class="mut">Atualizado: ${stamp(up)}</span></div>
+    ${L.map(x=>`<div class="r"><b>${esc(x.t)}</b><span>${fmt(x.m)}${isT(x.t)?'':' <span class="mut">(fora)</span>'}</span><span class="mut">${esc(x.o||'')}</span><span><button data-e="${x.i}">✎</button> <button data-x="${x.i}">✕</button></span></div>`).join('')}</div>`}).join('')||'<p class="mut">Nenhum registro.</p>';
+  $('sum').textContent=ds.length?`${ds.length} dia(s) · Chamados: ${fmt(TC)} · Fora do Jira: ${fmt(TN)} · Total: ${fmt(TC+TN)}`:'';bn()}
+$('add').onclick=()=>{try{const t=$('c').value.trim(),m=pt($('t').value),dt=$('d').value;
+  if(!dt)return msg('Informe a data (clique no campo de data e escolha o dia).');if(!t)return msg('Informe o chamado ou atividade.');if(m==null)return msg('Tempo inválido. Use o formato 1h 48m, 47m, 2h ou 1:48.');
+  dirty=true;const o={d:dt,t,m,o:$('o').value.trim(),u:new Date().toISOString()};let ed=false;
+  if(editId){const x=S.e.find(y=>y.i===editId);if(x){Object.assign(x,o);ed=true}else S.e.push({...o,i:Date.now()+Math.random()});editId=null;$('add').textContent='Adicionar'}else S.e.push({...o,i:Date.now()+Math.random()});
+  ['f1','f2','ty'].forEach(k=>$(k).value='');['c','t','o'].forEach(k=>$(k).value='');save();
+  msg((ed?'Atualizado: ':'Adicionado: ')+dt.split('-').reverse().join('/')+' · '+t+' · '+fmt(m));$('msg').className='ok';
+  const c=$('day-'+dt);if(c){c.scrollIntoView&&c.scrollIntoView({block:'center'});c.style.outline='2px solid var(--ac)';setTimeout(()=>c.style.outline='',2000)}
+}catch(err){$('msg').className='bad';msg('Erro: '+err.message)}};
+$('days').onclick=e=>{const x=e.target.dataset.x,ed=e.target.dataset.e;
+  if(x){if(delId===x){S.e=S.e.filter(y=>String(y.i)!==x);delId=null;save()}else{delId=x;e.target.textContent='Remover?';setTimeout(()=>{delId=null;render()},3000)}}
+  if(ed){const y=S.e.find(z=>String(z.i)===ed);editId=y.i;$('d').value=y.d;$('c').value=y.t;$('t').value=fmt(y.m);$('o').value=y.o||'';$('add').textContent='Salvar';scrollTo(0,0)}};
+$('imp').onclick=()=>$('ib').classList.toggle('hide');
+$('go').onclick=()=>{let d=null,n=0;const y=new Date().getFullYear(),now=new Date().toISOString();
+  $('it').value.split('\n').forEach(l=>{l=l.trim();if(!l)return;const h=l.match(/^(\d{1,2})-(\d{1,2})\b/);
+    if(h){d=y+'-'+h[2].padStart(2,'0')+'-'+h[1].padStart(2,'0');return}
+    const r=l.match(/^(\S+)\s+-?\s*((?:\d+\s*h)?\s*(?:\d+\s*m)?)\s*(.*)$/);
+    if(d&&r&&pt(r[2])!=null){S.e.push({d,t:r[1],m:pt(r[2]),o:r[3].trim(),u:now,i:Date.now()+Math.random()});n++}});
+  $('it').value='';$('ib').classList.add('hide');msg(n+' registros importados.');save()};
+const RET=2; // meses mantidos no app (contando o mês do backup)
+const MES=['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+const kOf=(y,m)=>{const x=new Date(y,m,1);return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')};
+const kn=k=>MES[+k.slice(5)-1]+'_'+k.slice(0,4);
+function csvOf(L){const rows=[['Data','Chamado','Minutos','Tempo','Observações','Atualizado']].concat([...L].sort((a,b)=>a.d<b.d?-1:1).map(x=>[x.d,x.t,x.m,fmt(x.m),x.o||'',x.u]));
+  return '\ufeff'+rows.map(r=>r.map(c=>'"'+String(c).replace(/"/g,'""')+'"').join(';')).join('\n')}
+async function saveCsv(name,data,type){const u=URL.createObjectURL(new Blob([data],{type:type||'text/csv;charset=utf-8'})),a=document.createElement('a');
+  a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),2000)}
+$('bj').onclick=()=>saveCsv('Registro_de_Horas_copia.json',JSON.stringify(S),'application/json');
+$('rj').onclick=()=>$('fj').click();
+$('fj').onchange=async()=>{const f=$('fj').files[0];if(!f)return;try{const d=JSON.parse(await f.text());if(!d||!Array.isArray(d.e))throw new Error('arquivo inválido');
+  let n=0;d.e.forEach(x=>{if(x&&x.d&&x.t&&!S.e.some(y=>y.i===x.i)){S.e.push({...x});n++}});(d.bk||[]).forEach(k=>{if(!S.bk.includes(k))S.bk.push(k)});dirty=true;save();msg(n+' registro(s) restaurado(s).');$('msg').className='ok'}
+  catch(err){msg('Não consegui restaurar: '+err.message)}$('fj').value=''};
+$('exp').onclick=async()=>{try{await saveCsv('Registro_de_Horas_completo.csv',csvOf(S.e))}catch(err){msg('Erro ao exportar: '+err.message)}};
+function fbd(y,m){const d=new Date(y,m,1);while(d.getDay()===0||d.getDay()===6)d.setDate(d.getDate()+1);return d}
+function plan(){const n=new Date();if(n<fbd(n.getFullYear(),n.getMonth()))return null;
+  const k=kOf(n.getFullYear(),n.getMonth()-1);if(S.bk.includes(k))return null;
+  const L=S.e.filter(x=>x.d.slice(0,7)===k);if(!L.length)return null;
+  const cut=kOf(n.getFullYear(),n.getMonth()-1-(RET-1)),O=S.e.filter(x=>x.d.slice(0,7)<cut);
+  return {k,L,cut,O}}
+function bn(){const p=plan();$('bn').classList.toggle('hide',!p);if(!p)return;
+  const last=p.O.map(x=>x.d.slice(0,7)).sort().pop();
+  $('bt').innerHTML=`<b>Backup de ${esc(kn(p.k).replace('_','/'))} pendente.</b><br><span class="mut">Ao confirmar, baixo o CSV do mês `+(p.O.length?`e depois apago ${p.O.length} registro(s) de ${esc(kn(last).replace('_','/'))} e anteriores (os que ainda não tinham backup vão num CSV extra).`:`(nenhum registro antigo para apagar).`)+`</span>`}
+$('bb').onclick=async()=>{const p=plan();if(!p)return;
+  try{await saveCsv('Registro_de_Horas_'+kn(p.k)+'.csv',csvOf(p.L));
+    const unb=p.O.filter(x=>!S.bk.includes(x.d.slice(0,7)));
+    if(unb.length){const last=unb.map(x=>x.d.slice(0,7)).sort().pop();await saveCsv('Registro_de_Horas_Antigos_ate_'+kn(last)+'.csv',csvOf(unb))}
+    S.bk.push(p.k);S.e=S.e.filter(x=>x.d.slice(0,7)>=p.cut);save();
+    msg('Backup de '+kn(p.k).replace('_','/')+' baixado.'+(p.O.length?' '+p.O.length+' registro(s) antigos apagados do app.':''));$('msg').className='ok'}
+  catch(err){msg('Backup não concluído, nada foi apagado: '+err.message)}};
+['f1','f2','ty','or'].forEach(i=>$(i).onchange=render);
+$('fc').onclick=()=>{$('f1').value=$('f2').value=$('ty').value='';$('or').value='d';render()};
+init();
+</script></body></html>

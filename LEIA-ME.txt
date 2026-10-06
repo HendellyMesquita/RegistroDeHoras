@@ -1,0 +1,12 @@
+CODIGO FONTE - REGISTRO DE HORAS
+
+Arquivos:
+- index.html : o app inteiro (HTML + CSS + JavaScript). Abre direto no navegador.
+- main.js    : casca do Electron que abre o index.html numa janela de desktop.
+- package.json
+
+Rodar como desktop (precisa do Node.js instalado):
+  npm install
+  npm start
+
+Para mudar a retencao do backup, edite a constante RET no index.html (padrao: 2 meses).

@@ -1,0 +1,9 @@
+{
+  "name": "registro-de-horas",
+  "productName": "Registro de Horas",
+  "version": "1.0.0",
+  "description": "Registro de horas por chamado",
+  "main": "main.js",
+  "scripts": { "start": "electron ." },
+  "devDependencies": { "electron": "*" }
+}
